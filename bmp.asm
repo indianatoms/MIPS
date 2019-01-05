@@ -1,3 +1,11 @@
+#description:  zrobic taka konwencja
+#	sets the color of specified pixel
+#arguments:
+#	$a0 - x coordinate
+#	$a1 - y coordinate - (0,0) - bottom left corner
+#	$a2 - 0RGB - pixel color
+
+
 #only 24-bits 600x50 pixels BMP files are supported
 .eqv BMP_FILE_SIZE 90122
 .eqv BYTES_PER_ROW 1800
@@ -15,12 +23,12 @@ fname:	.asciiz "source.bmp"
 fbin:	.asciiz "input.bin"
 output:	.asciiz "output.bmp"
 
-p1:	.asciiz	"set_dir "
-p2:	.asciiz	"move "
-p3:	.asciiz	"set_pos "
-p4:	.asciiz	"pen_state "
-sep:	.asciiz ":"
-error:	.asciiz "ERROR: Outside the board \n"
+set_dir:	.asciiz	"set_direction "
+move:		.asciiz	"move "
+set_pos:	.asciiz	"set_position "
+pen_state:	.asciiz	"pen_state "
+colon:	.asciiz ":"
+error:	.asciiz "Turtle reached file border \n"
 	.text
 main:
 	jal	read_bmp
@@ -38,33 +46,34 @@ exit:	li 	$v0,10		#Terminate the program
 #s6 - current y pos
 
 read_bin:
-		sub $sp, $sp, 4		#push $ra to the stack
-		sw $ra,4($sp)
-		sub $sp, $sp, 4		#push $s1
-		sw $s1, 4($sp)
-	#open file
-		li $v0, 13
-			la $a0, fbin		#file name 
-			li $a1, 0		#flags: 0-read file
-			li $a2, 0		#mode: ignored
-			syscall
-		move $s1, $v0     	# save the file descriptor
+	sub 	$sp, $sp, 4		#push $ra to the stack
+	sw 	$ra,4($sp)
+	sub 	$sp, $sp, 4		#push $s1
+	sw 	$s1, 4($sp)
+		#open file
+			li 	$v0, 	13
+			la 	$a0, 	fbin		#file name 
+			li 	$a1, 	0		#flags: 0-read file
+			li 	$a2, 	0		#mode: ignored
+		syscall
+			move 	$s1, 	$v0     	# save the file descriptor
 		
 	#check for errors - if the file was opened
 
 #read file
-		li $v0, 14
+		li $v0, 14				
 		move $a0, $s1
 		la $a1, buffer
 		li $a2, BIN_FILE_SIZE
 		syscall
 			
-		li	$t1, 0					#counter (do not modify outside the loop)
-		li	$t2, 0 					#keeps start of instruction in bytes (do not modify outside the loop)
-	#used in putpixel
+		move 	$t1, $0					#counter (do not modify outside the loop)
+		move 	$t2, $0					#keeps start of instruction in bytes (do not modify outside the loop)
+
+
 	pre_loop:
 		add	$t2, $t2, $t1
-		li	$t1, 0					#reset counter
+		move 	$t1, $0					#reset counter
 	loop:
 		add	$t0, $t1, $t2 
 		bgt	$t0, BIN_FILE_SIZE, loop_exit		#end of file
@@ -76,44 +85,42 @@ read_bin:
 	end_of_instruction:
 		lb	$t3, buffer($t2)
 		
-		li	$v0, 1			#Print command name
-		la	$a0, ($t3)	
-		syscall
+
 		
-		li	$v0, 1			#Print command name
-		la	$a0, ($t4)	
-		syscall
 		
 		move	$t4, $t3
-		srl	$t3, $t3, 31				#t3 1 bit of command			
-		sll	$t4, $t4, 25
+
+		sll	$t4, $t4, 24
+		srl	$t3, $t4, 31				#t3 1 bit of command			
+		sll	$t4, $t4, 1
 		srl	$t4, $t4, 31				#t4 2 bit of command
 		
 		add 	$t0, $t3, $t4
 		
-
+		beq 	$t3, 1, first_bit_one 			#1-			
+		beq	$t4, 0, set_direction_command 		#00
+		j	set_position_command			#01
 		
-		beq	$t0, 0, set_direction_command
-		beq	$t0, 2, move_command
-		beq	$t3, 0, set_position_command
-		j	pen_state_command
+	first_bit_one:	#1-
+		beq 	$t4, 1, move_command			#11
+		j	pen_state_command			#10
 
-	set_direction_command: #16 bit
-		jal 	command_set_direction
+
+	set_direction_command: 					#16 bit
+		jal 	dir_com
 		j	pre_loop
-	move_command: #16 bit
-		jal 	command_move
+	move_command: 						#16 bit
+		jal 	move_com
 		j	pre_loop
-	set_position_command: #32 bit
-		jal 	command_set_position
-		addiu	$t1, $t1, 2
+	set_position_command: 					#32 bit
+		jal 	pos_com
 		j	pre_loop
-	pen_state_command: #16 bit
-		jal 	command_pen_state
+	pen_state_command: 					#16 bit
+		jal 	pen_com
 		j	pre_loop
 
 	loop_exit:
-	#close file
+#close file
 		li $v0, 16
 		move $a0, $s1
 			syscall
@@ -125,9 +132,9 @@ read_bin:
 		jr $ra
 	
 # ============================================================================
-command_set_direction: 
-		li	$v0, 4			#Print command name
-		la	$a0, p1		
+dir_com: 
+		li	$v0, 4					#Print command name
+		la	$a0, set_dir		
 		syscall
 		
 		add	$t9, $t2,1
@@ -139,6 +146,7 @@ command_set_direction:
 		sll	$t3, $t3, 31
 		srl	$t3, $t3, 31				#t3 - d0 bit of command
 		
+
 		add	$s4, $zero, $t4
 		sll	$s4, $s4, 1
 		add	$s4, $s4, $t3				#s4 - turtle direction
@@ -149,16 +157,17 @@ command_set_direction:
 		
 		jr $ra
 # ============================================================================
-command_move:
+move_com:
 		li	$v0, 4			#Print command name
-		la	$a0, p2		
+		la	$a0, move		
 		syscall
 		
 		
 		
 		lb	$t3, buffer($t2)			#t3 - start of instruction(first word)
 		#s7 - how many to move
-		li 	$t0, 0					#reset t0
+		move 	$t0, $0					#set t0 to 0 
+				
 		
 
 		sll	$t3, $t3, 30				#offset bits
@@ -188,18 +197,6 @@ command_move:
 		add	$t0, $t0, 1				#advance iterations counter
 		j move_loop
 	move_loop_exit:
-		
-		
-
-		
-		
-
-	#s2 - current pen state
-	#s3 - current pen color
-	#s4 - turtle direction
-	#s5 - current x pos
-	#s6 - current y pos
-	#t7 - how many to move
 
 	
 		move	$s7, $ra				#save ra for return later
@@ -245,7 +242,7 @@ command_move:
 		la	$a0, error	
 		syscall
 		
-		 li    $t7, 0                    #reset move counter
+		move $t7, $0
         
         	beq    $s4, 3, move1_right            
         	beq    $s4, 2, move1_down
@@ -267,15 +264,16 @@ command_move:
 		move	$ra, $s7				#restore ra saved before		
 		jr	$ra
 # ============================================================================
-command_set_position:
+pos_com:
 		li	$v0, 4			#Print command name
-		la	$a0, p3		
+		la	$a0, set_pos		
 		syscall
 
 		#s6 - current y pos
 		add	$t9, $t2,2
-		lb	$t3, buffer($t9)			#t3 - start of instruction(first word)		
-		li 	$t0, 0					#reset t0
+		lb	$t3, buffer($t9)			#t3 - start of instruction(first word)	
+		move 	$t0, $0					#reset t0
+				
 		
 		sll	$t3, $t3, 24				#offset bits
 		srl	$t4, $t3, 31				#t4 - y5 bit of command
@@ -294,8 +292,8 @@ command_set_position:
 	set_pos_loop_exit:	
 		
 		add	$t9, $t2,2
-		lb	$t3, buffer($t9)			#t3 - start of instruction(first word)		
-		li 	$t0, 0					#reset t0
+		lb	$t3, buffer($t9)			#t3 - start of instruction(first word)	
+		move 	$t0, $0					#set t0 to 0 	
 
 		sll	$t3, $t3, 30				#offset bits
 		srl	$t4, $t3, 31				#t4 - x1 bit of command
@@ -307,7 +305,7 @@ command_set_position:
 		add	$s5, $s5, $t4				#add to current x pos
 		
 		sll	$s5, $s5, 1				#shift y pos	
-		li 	$t0, 0					#reset t0
+		move 	$t0, $0					#set t0 to 0 
 		addiu	$t9, $t2, 3				#t9 - is set to next word
 		lb	$t3, buffer($t9)			#t3 - start of instruction(second word 2nd part)
 		
@@ -327,12 +325,12 @@ command_set_position:
 		
 	set_pos_loop_exit2:
 	
-			
+		addiu	$t1, $t1, 2	
 		jr $ra
 # ============================================================================
-command_pen_state:
+pen_com:
 		li	$v0, 4			#Print command name
-		la	$a0, p4		
+		la	$a0, pen_state		
 		syscall
 		
 		lb	$t3, buffer($t2)			#t3 - start of instruction(first word)		
@@ -421,18 +419,18 @@ command_pen_state:
 		add	$s3, $zero, $t8				#s3 - color
 		
 		li    $v0, 4            #Print command name
-        	la    $a0, sep    
+        	la    $a0, colon    
        		syscall
         	li    $v0, 35            #Print command name
         	la    $a0, ($s3)        
         	syscall
         	li    $v0, 4            #Print command name
-       		la    $a0, sep        
+       		la    $a0, colon        
         	syscall
-        	#
+
 		
 		jr $ra
-# ============================================================================
+# ============================================================================ od typa
 
 read_bmp:
 		sub $sp, $sp, 4		#push $ra to the stack
@@ -467,7 +465,7 @@ read_bmp:
 		add $sp, $sp, 4
 		jr $ra
 
-# ============================================================================
+# ============================================================================ od typa
 save_bmp:
 		sub $sp, $sp, 4		#push $ra to the stack
 		sw $ra,4($sp)
@@ -501,7 +499,7 @@ save_bmp:
 		add $sp, $sp, 4
 		jr $ra
 
-# ============================================================================
+# ============================================================================ Od typa
 put_pixel:
 #description: 
 #	sets the color of specified pixel
@@ -535,7 +533,7 @@ put_pixel:
 		lw $ra, 4($sp)		#restore (pop) $ra
 		add $sp, $sp, 4
 		jr $ra
-# ============================================================================
+# ============================================================================ Od typa
 get_pixel:
 #description: 
 #	returns color of specified pixel
