@@ -1,7 +1,9 @@
+#change s's
+
 #only 24-bits 600x50 pixels BMP files are supported
 .eqv BMP_FILE_SIZE 90122
 .eqv BYTES_PER_ROW 1800
-.eqv BIN_FILE_SIZE 22	#in bytes
+.eqv BIN_FILE_SIZE 10	#in bytes
 
 .data
 #space for the 600x50px 24-bits bmp image
@@ -11,7 +13,7 @@ image:	.space BMP_FILE_SIZE
 buff:	.space BIN_FILE_SIZE
 
 fname:	.asciiz "source.bmp"
-fbin:	.asciiz "square.bin"
+fbin:	.asciiz "move0.bin"
 output:	.asciiz "output.bmp"
 
 set_dir:	.asciiz	"set_direction "
@@ -104,7 +106,7 @@ read_bin:
 		j	pre_loop
 
 	close_file:
-#close file
+#close file .bin
 		li $v0, 16
 		move $a0, $s1
 			syscall
@@ -117,279 +119,200 @@ read_bin:
 	
 # ============================================================================
 dir_com: 
-	
 		add	$t9, $t2,1
 		lb	$t3, buff($t9)			#t3 - start of instruction(first word)
 				
 		sll	$t4, $t3, 30
-		srl	$t4, $t4, 31			#t4 - d1 bit of command
+		srl	$t4, $t4, 30			#t4 - d1d0 
 		
-		sll	$t3, $t3, 31
-		srl	$t3, $t3, 31			#t3 - d0 bit of command
-		
-
-		add	$s4, $zero, $t4
-		sll	$s4, $s4, 1
-		add	$s4, $s4, $t3			#s4 - d1d0
+		la	$s4, ($t4)			#load d1d0 on s4
 
 		jr $ra
 # ============================================================================
 move_com:
-		lb	$t3, buff($t2)			#t3 - start of instruction(first word)
-		#s7 - how many to move
-		move 	$t0, $0					#t0 = 0
-				
-		sll	$t3, $t3, 30				#get m9 bit
-		srl	$t4, $t3, 31				#t4 - m9
-		add	$t7, $t7, $t4				#add to move
+		lb	$t3, buff($t2)			#t3 - first byte
+
 		
-		sll	$t7, $t7, 1				#shift move				
-		sll	$t3, $t3, 1				#get m8
-		srl	$t4, $t3, 31				#t4 - m9+m8
-		add	$t7, $t7, $t4				#add to move
+		sll	$t3, $t3, 30				#
+		srl	$t4, $t3, 30				#t4 - m9m8
+		add	$t7, $t7, $t4				#t7 - m9m8
+		
+		sll	$t7, $t7, 8				#shift move - m9m8 0000 0000				
+		
 		
 		add	$t9, $t2,1
 		lb	$t3, buff($t9)			# load nex byte		
 		
-		sll	$t7, $t7, 1				#shift move
-		sll	$t3, $t3, 24				#offset bits	
-		srl	$t4, $t3, 31				#t4 - m9+m8+m7
-		add	$t7, $t7, $t4				#add to current move
-	
-	move_loop:
-		sll	$t7, $t7, 1				#shift move				
-		sll	$t3, $t3, 1				#get next bit
-		srl	$t4, $t3, 31				#t4 - m9+m8+m7+m6+m5+m4+m3+m2+m1+m0
-		add	$t7, $t7, $t4				#add to move
+		sll	$t3, $t3, 24				#get m9 bit
+		srl	$t4, $t3, 24				#t4 - m9
 		
-		beq	$t0, 6, move_loop_exit			#exit after 7 iterations
-		add	$t0, $t0, 1				#advance iterations counter
-		j move_loop
-	move_loop_exit:	
-		move	$s7, $ra				#save ra for return later
+		add	$t7, $t7, $t4				#t7 - m9m8 m7m6m5m4m3m2m1m0
+		
+		la	$s7, ($t7)				#s7 - m9m8 m7m6m5m4m3m2m1m0
+		
+		move	$s7, $ra				#save ra for return later / due to nested get_pixel
 
 #s5 - current x pos
 #s6 - current y pos		
 		
-	execute_move_loop:
+	move_loop:
 		#put red pixel in bottom left corner	
 		#li	$a0, 0		#x
 		#li	$a1, 0		#y
 		#li 	$a2, 0x00FF0000	#color - 00RRGGBB
 		#jal	put_pixel
 	
-	
-		#add	$a0, $zero, $s5				#set x
-		#add	$a1, $zero, $s6 			#set y
-		la	$a0,  ($s5)			#set x
-		la	$a1,  ($s6) 			#set y
-		
-		bltz	$s5, execute_move_error			#error: x<0
-		bge	$s5, 600, execute_move_error		#error: x>600
-		bltz	$s6, execute_move_error			#error: y<0
-		bge	$s6, 50, execute_move_error		#error: y>50
-		add	$a2, $zero, $s3				#set color
-		beqz	$t7, execute_move_loop_exit	
-		beqz	$s2, execute_move_paint			
-	execute_move_continue:
-		beqz	$t7, execute_move_loop_exit	
+		la	$a0,  ($s5)				#set x where to put pixel
+		la	$a1,  ($s6) 				#set y where to put pixel	
+		ble	$s5, -1, border_error			#if x<=-1 than error
+		bgt	$s5, 599, border_error			#if x>=599 than error
+		ble	$s6, -1, border_error			#if y<=-1 than error
+		bgt	$s6, 49, border_error			#if y>=49 than error
+		la	$a2, ($s3)				#set color
+		beqz	$t7, move_exit				#prevent move 0
+		beqz	$s2, paint				#check if pen state = 1
+	move_pixel:
+		beqz	$t7, move_exit				#if move = 0 end
 		beq	$s4, 3, move_right			
 		beq	$s4, 2, move_down
 		beq	$s4, 1, move_left
 		beq	$s4, 0, move_up
-	execute_move_continue2:
+	proceed:
 		
 		sub	$t7, $t7, 1				#reduce move counter
-		j 	execute_move_loop
+		j 	move_loop
 
-	execute_move_paint:
+	paint:
 		jal	put_pixel				#paint pixel
-		j	execute_move_continue
+		j	move_pixel
 		
 	move_up:
 		add	$s6, $s6, 1
-		j	execute_move_continue2
+		j	proceed
 	move_down:	
 		sub	$s6, $s6, 1
-		j	execute_move_continue2
+		j	proceed
 	move_right:
 		add	$s5, $s5, 1
-		j	execute_move_continue2
+		j	proceed
 	move_left:
 		sub	$s5, $s5, 1
-		j	execute_move_continue2
+		j	proceed
 
-	execute_move_error:
+#in case of error
+	border_error:
 		li	$v0, 4			#Print error message
 		la	$a0, error	
 		syscall
 		
 		move 	$t7, $0
         
-        	beq    $s4, 3, move1_right            
-        	beq    $s4, 2, move1_down
-       		beq    $s4, 1, move1_left
-        	beq    $s4, 0, move1_up
-        move1_right:
+        	beq    $s4, 3, undo_right            
+        	beq    $s4, 2, undo_down
+       		beq    $s4, 1, undo_left
+        	beq    $s4, 0, undo_up
+        undo_right:
             	sub    $s5, $s5, 1
-             	j     execute_move_loop_exit
-        move1_down:
+             	j     move_exit
+        undo_down:
             	add    $s6, $s6, 1
-            	j     execute_move_loop_exit
-        move1_left:
+            	j     move_exit
+        undo_left:
             	add    $s5, $s5, 1
-            	j     execute_move_loop_exit
-        move1_up:
+            	j     move_exit
+        undo_up:
             	sub    $s6, $s6, 1
 		
-	execute_move_loop_exit:	
+	move_exit:	
 		move	$ra, $s7				#restore ra saved before		
 		jr	$ra
 # ============================================================================
-pos_com:
+pos_com:	#set position command
 		#s6 - current y pos
 		add	$t9, $t2,2
 		lb	$t3, buff($t9)				#t3 - start of instruction(first word)	
-		move 	$t0, $0					#reset t0
 				
-		
+	#set Y	
 		sll	$t3, $t3, 24				#offset bits
-		srl	$t4, $t3, 31				#t4 - y5 bit of command
-		add	$s6, $zero, $t4				#add to current y pos
-	pos_loop_y:
-		sll	$s6, $s6, 1				#shift y pos				
-		sll	$t3, $t3, 1				#get next bit
-		srl	$t4, $t3, 31				#t4 - y5-0 bit of command
-		add	$s6, $s6, $t4				#add to current y pos
+		srl	$t4, $t3, 26				#t4 - y5y4y3y2y1y0
+		la	$s6, ($t4)				#store y 0on #s6
+		#add	$s6, $zero, $t4				#add to current y pos
+	#set X	
 		
-		beq	$t0, 4, pos_loop_y_end			#exit after 5 iterations
-		add	$t0, $t0, 1				#advance iterations counter
-		j pos_loop_y
+		add	$t9, $t2,3
+		lb	$t3, buff($t9)				#t3 - start of instruction(first word)	
+
+		sll	$t3, $t3, 24				#offset bits
+		srl	$t4, $t3, 24				#t4 - x7x6x5x4x3x2x1
 		
-		
-	pos_loop_y_end:	
 		
 		add	$t9, $t2,2
-		lb	$t3, buff($t9)				#t3 - start of instruction(first word)	
-		move 	$t0, $0					#set t0 to 0 	
-
-		sll	$t3, $t3, 30				#offset bits
-		srl	$t4, $t3, 31				#t4 - x1 bit of command
-		add	$s5, $zero, $t4				#add to current x pos
-		
-		sll	$s5, $s5, 1				#shift y pos				
-		sll	$t3, $t3, 1				#get next bit
-		srl	$t4, $t3, 31				#t4 - x0 bit of command
-		add	$s5, $s5, $t4				#add to current x pos
-		
-		sll	$s5, $s5, 1				#shift y pos	
-		move 	$t0, $0					#set t0 to 0 
-		addiu	$t9, $t2, 3				#t9 - is set to next word
-		lb	$t3, buff($t9)				#t3 - start of instruction(second word 2nd part)
-		
-		sll	$t3, $t3, 24				#offset bits	
-		srl	$t4, $t3, 31				#t4 - x9 bit of command
-		add	$s5, $s5, $t4				#add to current x pos
-
-	set_pos_loop_x:
-		sll	$s5, $s5, 1				#shift y pos				
-		sll	$t3, $t3, 1				#get next bit
-		srl	$t4, $t3, 31				#t4 - x9-2 bit of command
-		add	$s5, $s5, $t4				#add to current x pos
-		
-		beq	$t0, 6, set_pos_loop_x_end		#exit after 7 iterations
-		add	$t0, $t0, 1				#advance iterations counter
-		j set_pos_loop_x
-		
-	set_pos_loop_x_end:
+		lb	$t3, buff($t9)				#t3 - start of instruction(first word)					
 	
-		addiu	$t1, $t1, 2	
+		sll	$t3, $t3, 24				#offset bits
+		srl	$t5, $t5, 30				#t5 - x9x8
+		sll	$t5, $t5, 8				#t5 - x9x8 0000 0000
+		add	$t5, $t4, $t5				#t5 - x9x8x7x6x5x4x3x2x1
+		
+		la	$s5, ($t5)
+	
+		addiu	$t1, $t1, 2				#add to bytes to counter cause set pos is 32 bit command
 		jr $ra
 # ============================================================================
 pen_com:
 		lb	$t3, buff($t2)				#t3 - 1st byte of instruction	
-
+#set pen State
 		sll	$t3, $t3, 27
 		srl	$t3, $t3, 31				#t3 up/down
 		
-		add	$s2, $zero, $t3				#s2 = t3 - store up/down
+		la	$s2, ($t3)				#s2 = t3 - store up/down
+#first we set green casue we use rgb color format
+#set red	
 		
 		add	$t9, $t2,1
 		lb	$t3, buff($t9)				#t3 - 2nd byte of instruction
-		
+			
 		
 		sll	$t3, $t3, 28
-		srl	$t4, $t3, 31				#get current b- 
+		srl	$t8, $t3, 28				#get current t4 - r3r2r1r0
 		
-		add	$t8, $zero, $zero
-		add	$t8, $t8, $t4				#t8 - r3
-		
-		
-		add	$t0, $zero, $zero
-	set_red_loop:
-		sll	$t8, $t8, 1				#shift y pos				
-		sll	$t3, $t3, 1				#get next bit
-		srl	$t4, $t3, 31				#t4 - r2/r1/r0
-		add	$t8, $t8, $t4				#t8 - store r3+r2+r1+r0 
-
-				
-		beq	$t0, 2, set_green			#exit after 3 iterations
-		add	$t0, $t0, 1				#loop iterator
-		j set_red_loop
-	
+#set green
 	
 	set_green:
-		sll	$t8, $t8, 5				#add four zeros 	
+		sll	$t8, $t8, 8				#add four zeros t4 - r3r2r1r0 0000
+			
 		add	$t9, $t2,1
 		lb	$t3, buff($t9)				#load second byte
 		
 		sll	$t3, $t3, 24
-		srl	$t4, $t3, 31				#t3 get g3
+		srl	$t4, $t3, 28				#t4 - g3g2g1g0
 		
+		add	$t8, $t8, $t4				#t8 - r3r2r1r0 0000 g3g2g1g0
 
-		add	$t8, $t8, $t4				#add to current x pos
-		add	$t0, $zero, $zero
-
-	set_green_loop:	
-		sll	$t8, $t8, 1				#shift y pos				
-		sll	$t3, $t3, 1				#get next bit
-		srl	$t4, $t3, 31				#store on t4 g2/g1/g0
-		add	$t8, $t8, $t4				#add to color g3+g2+g1+g0
-
-		
-		beq	$t0, 2, set_blue			#exit after 3 iterations
-		add	$t0, $t0, 1				#advance iterations counter
-		j set_green_loop
-		
+#set blue
 	set_blue:
-		sll	$t8, $t8, 5				#add four zeros 	
-		lb	$t3, buff($t2)				#t3 - start of instruction(first word)
+		sll	$t8, $t8, 8				#at8 - r3r2r1r0 0000 g3g2g1g0 0000	
+		lb	$t3, buff($t2)				#t3 - first byte
 
-#		sll	$t3, $t3, 1				#get next bit
+
 		sll	$t3, $t3, 28
-		srl	$t4, $t3, 31				#t3 store b3
+		srl	$t4, $t3, 28				#t3 - b3b2b1b0
 		
-		add	$t8, $t8, $t4				#t8 - used to store the color
-		add	$t0, $zero, $zero
-
-	set_blue_loop:	
-		sll	$t8, $t8, 1				#shift y pos				
-		sll	$t3, $t3, 1				#get next bit
-		srl	$t4, $t3, 31				#store current b2/b1/b0
-		add	$t8, $t8, $t4				#store b3+b2+b1+b0
-
+		add	$t8, $t8, $t4				#t8 - r3r2r1r0 0000 g3g2g1g0 0000 r3r2r1r0
+		sll	$t8, $t8, 4				##t8 - r3r2r1r0 0000 g3g2g1g0 0000 r3r2r1r0 0000
+#color seting finished
+		la	$s3, ($t8)				#s3 - color made of r3r2r1r0 0000 g3g2g1g0 0000 b3b2b1b0 0000
 		
-		beq	$t0, 2, finish_setting_color		#exit after 3 iterations
-		add	$t0, $t0, 1				#advance iterations counter
-		j set_blue_loop
-			
-	finish_setting_color:
-		sll	$t8, $t8, 4				#add four zeros - four last zeros
-		add	$s3, $zero, $t8				#s3 - color made of r3r2r1r0 0000 g3g2g1g0 0000 b3b2b1b0 0000
+		li $v0, 35
+		la $a0, ($s3) 	
+		syscall
+		
+		li $v0, 4
+		la $a0, colon 	
+		syscall
 		
 		jr $ra
-# ============================================================================ od typa
-
+# ============================================================================ OT
 read_bmp:
 		sub $sp, $sp, 4					#push $ra to the stack
 		sw $ra,4($sp)
@@ -423,7 +346,7 @@ read_bmp:
 		add $sp, $sp, 4
 		jr $ra
 
-# ============================================================================ od typa
+# ============================================================================ OT
 save_bmp:
 		sub $sp, $sp, 4					#push $ra to the stack
 		sw $ra,4($sp)
@@ -457,7 +380,7 @@ save_bmp:
 		add $sp, $sp, 4
 		jr $ra
 
-# ============================================================================
+# ============================================================================ OT
 put_pixel:
 #description: 
 #	sets the color of specified pixel
@@ -491,7 +414,7 @@ put_pixel:
 		lw $ra, 4($sp)		#restore (pop) $ra
 		add $sp, $sp, 4
 		jr $ra
-# ============================================================================
+# ============================================================================ OT
 get_pixel:
 #description: 
 #	returns color of specified pixel
